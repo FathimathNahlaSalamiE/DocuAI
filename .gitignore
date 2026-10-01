@@ -1,1 +1,6 @@
 .env"backend/models/" 
+backend/venv/
+backend/.env
+backend/chroma_db/
+backend/uploads/
+frontend/node_modules/
