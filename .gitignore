@@ -1,6 +1,8 @@
-.env"backend/models/" 
+.env
+backend/models/ 
 backend/venv/
 backend/.env
 backend/chroma_db/
 backend/uploads/
-frontend/node_modules/
+frontend/node_modules/__pycache__/ 
+*.pyc 
