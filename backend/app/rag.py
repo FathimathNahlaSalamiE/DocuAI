@@ -75,6 +75,12 @@ Context:
 Question: {question}"""
 
 
+def _snippet(text: str, limit: int = 220) -> str:
+    """A short, single-line excerpt of a chunk, shown on the source card in the UI."""
+    flat = " ".join(text.split())
+    return flat if len(flat) <= limit else flat[:limit].rsplit(" ", 1)[0] + "…"
+
+
 def answer(question: str, owner: str, k: int = 4, sources: list[str] | None = None):
     """
     sources: None or [] -> search all of this owner's files; otherwise only the listed files.
@@ -93,5 +99,12 @@ def answer(question: str, owner: str, k: int = 4, sources: list[str] | None = No
         f"[{d.metadata['source']} p.{d.metadata.get('page', 0) + 1}] {d.page_content}" for d in docs
     )
     out = llm.invoke(PROMPT.format(context=context, question=question))
-    cited = [{"file": d.metadata["source"], "page": d.metadata.get("page", 0) + 1} for d in docs]
+    cited = [
+        {
+            "file": d.metadata["source"],
+            "page": d.metadata.get("page", 0) + 1,
+            "snippet": _snippet(d.page_content),
+        }
+        for d in docs
+    ]
     return {"answer": out.content, "sources": cited, "chunks": [d.page_content for d in docs]}

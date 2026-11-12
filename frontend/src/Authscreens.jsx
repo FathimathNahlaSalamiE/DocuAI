@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useId } from "react";
+import { Wordmark, UploadIcon, ChatIcon, QuoteIcon, MailIcon } from "./ui";
 
 export const API = import.meta.env.VITE_API_URL;
 
@@ -13,7 +14,7 @@ export function errorText(d, fallback = "Something went wrong.") {
   return fallback;
 }
 
-const OFFLINE = "Can't reach the server. Check that the backend is running.";
+const OFFLINE = "Can’t reach the server. Check that the backend is running.";
 const COOLDOWN = 60; // seconds before the resend button works again
 
 async function post(path, body) {
@@ -26,11 +27,65 @@ async function post(path, body) {
   return { r, d };
 }
 
-function Brand() {
+/* ---------------- shared layout: green story panel + the form ---------------- */
+
+export function AuthLayout({ children }) {
   return (
-    <div className="brand">
-      <span className="brand-mark">Docu</span>
-      <span className="brand-mark brand-mark-accent">AI</span>
+    <div className="auth-page">
+      <aside className="auth-brand">
+        <Wordmark />
+        <div>
+          <h2>Ask your documents anything.</h2>
+          <p className="lead">
+            Upload a PDF and get clear answers in plain English, with the exact page each answer came from.
+          </p>
+          <div className="feat">
+            <span className="ic"><UploadIcon size={20} /></span>
+            <div><b>Upload your PDFs</b><span className="d">Contracts, handbooks, reports, study notes.</span></div>
+          </div>
+          <div className="feat">
+            <span className="ic"><ChatIcon size={20} /></span>
+            <div><b>Ask in your own words</b><span className="d">No special commands. Just type a question.</span></div>
+          </div>
+          <div className="feat">
+            <span className="ic"><QuoteIcon size={20} /></span>
+            <div><b>See where it came from</b><span className="d">Every answer shows its source and page.</span></div>
+          </div>
+        </div>
+        <p className="brand-fine">Your documents stay private to you.</p>
+      </aside>
+      <main className="auth-main">
+        <div className="auth-card">
+          <div className="auth-mobile-logo"><Wordmark dark /></div>
+          {children}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+function PasswordField({ label, value, onChange, autoComplete, placeholder, autoFocus, hint }) {
+  const id = useId();
+  const [show, setShow] = useState(false);
+  return (
+    <div className="field">
+      <label htmlFor={id}>{label}</label>
+      <div className="pw">
+        <input
+          id={id}
+          className="input"
+          type={show ? "text" : "password"}
+          autoComplete={autoComplete}
+          value={value}
+          onChange={onChange}
+          placeholder={placeholder}
+          autoFocus={autoFocus}
+        />
+        <button type="button" className="show" onClick={() => setShow(s => !s)}>
+          {show ? "Hide" : "Show"}
+        </button>
+      </div>
+      {hint && <small className="hint">{hint}</small>}
     </div>
   );
 }
@@ -71,13 +126,10 @@ export function AuthScreen({ onAuth, notice, onGuest }) {
     setNeedsVerify(false);
 
     const cleanEmail = email.trim();
-    if (!/^\S+@\S+\.\S+$/.test(cleanEmail)) {
-      setError("Enter a valid email address.");
-      return;
-    }
+    if (!/^\S+@\S+\.\S+$/.test(cleanEmail)) return setError("Enter a valid email address.");
     if (mode === "signup") {
       if (password.length < 8) return setError("Password must be at least 8 characters.");
-      if (password !== confirm) return setError("Passwords don't match.");
+      if (password !== confirm) return setError("Passwords don’t match.");
     }
     if (mode === "signin" && !password) return setError("Enter your password.");
 
@@ -88,7 +140,7 @@ export function AuthScreen({ onAuth, notice, onGuest }) {
         if (r.ok) onAuth(d.token, d.email);
         else {
           setError(errorText(d));
-          if (r.status === 403) setNeedsVerify(true); // correct password, email not verified yet
+          if (r.status === 403) setNeedsVerify(true); // right password, email not verified yet
         }
       } else if (mode === "signup") {
         const { r, d } = await post("/register", { email: cleanEmail, password });
@@ -132,57 +184,55 @@ export function AuthScreen({ onAuth, notice, onGuest }) {
     await resend("verify");
   }
 
-  /* ---- "check your inbox" screen ---- */
+  /* ---- "check your inbox" ---- */
   if (mode === "check") {
     const verifying = checkKind === "verify";
     return (
-      <div className="auth-wrap">
-        <div className="auth-card">
-          <Brand />
-          <h1 className="auth-title">Check your inbox</h1>
-          <p className="auth-sub">
-            {verifying
-              ? <>We sent a verification link to <strong>{email.trim()}</strong>. Click it to activate your account.</>
-              : <>If an account exists for <strong>{email.trim()}</strong>, we sent a link to reset your password. It expires in 30 minutes.</>}
-          </p>
-          {info && <p className="auth-info" role="status">{info}</p>}
-          {error && <p className="auth-error" role="alert">{error}</p>}
-          <button className="auth-submit" onClick={() => resend()} disabled={cooldown > 0}>
-            {cooldown > 0 ? `Resend in ${cooldown}s` : verifying ? "Resend verification email" : "Resend reset link"}
-          </button>
-          <p className="auth-switch">
-            <button type="button" className="link-btn" onClick={() => go("signin")}>Back to sign in</button>
-          </p>
-        </div>
-      </div>
+      <AuthLayout>
+        <span className="a-badge"><MailIcon size={28} /></span>
+        <h1 className="a-title">Check your inbox</h1>
+        <p className="a-sub">
+          {verifying ? (
+            <>We sent a verification link to <strong>{email.trim()}</strong>. Click it to activate your account.</>
+          ) : (
+            <>If an account exists for <strong>{email.trim()}</strong>, we sent a link to reset your password. It expires in 30 minutes.</>
+          )}
+        </p>
+        {info && <p className="msg-ok" role="status">{info}</p>}
+        {error && <p className="msg-err" role="alert">{error}</p>}
+        <button className="btn-primary" onClick={() => resend()} disabled={cooldown > 0}>
+          {cooldown > 0 ? `Resend in ${cooldown}s` : verifying ? "Resend verification email" : "Resend reset link"}
+        </button>
+        <p className="a-switch">
+          <button type="button" className="lnk" onClick={() => go("signin")}>Back to sign in</button>
+        </p>
+      </AuthLayout>
     );
   }
 
   /* ---- sign in / sign up / forgot ---- */
   const titles = {
-    signin: ["Sign in", "Pick up where you left off with your documents."],
-    signup: ["Create your account", "Your documents stay private to your account."],
-    forgot: ["Reset your password", "Enter your email and we'll send you a link to choose a new one."],
+    signin: ["Welcome back", "Sign in to pick up where you left off."],
+    signup: ["Create your account", "Keep your documents and chats safe in one place."],
+    forgot: ["Reset your password", "Enter your email and we’ll send you a link to choose a new one."],
   };
   const [title, sub] = titles[mode];
 
   return (
-    <div className="auth-wrap">
-      <form className="auth-card" onSubmit={submit} noValidate>
-        <Brand />
-        <h1 className="auth-title">{title}</h1>
-        <p className="auth-sub">{sub}</p>
+    <AuthLayout>
+      <form className="auth-card" style={{ maxWidth: "none" }} onSubmit={submit} noValidate>
+        <h1 className="a-title">{title}</h1>
+        <p className="a-sub">{sub}</p>
         {onGuest && mode !== "forgot" && (
-          <p className="auth-note">
-            Documents and chats from your guest session stay separate from your account.
-          </p>
+          <p className="a-note">Documents and chats from your guest session stay separate from your account.</p>
         )}
 
-        {notice && mode === "signin" && <p className="auth-info" role="status">{notice}</p>}
+        {notice && mode === "signin" && <p className="msg-ok" role="status">{notice}</p>}
 
         <label className="field">
           <span>Email</span>
           <input
+            className="input"
             type="email"
             autoComplete="email"
             value={email}
@@ -193,72 +243,64 @@ export function AuthScreen({ onAuth, notice, onGuest }) {
         </label>
 
         {mode !== "forgot" && (
-          <label className="field">
-            <span>Password</span>
-            <input
-              type="password"
-              autoComplete={mode === "signup" ? "new-password" : "current-password"}
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              placeholder={mode === "signup" ? "At least 8 characters" : "Your password"}
-            />
-          </label>
+          <PasswordField
+            label="Password"
+            autoComplete={mode === "signup" ? "new-password" : "current-password"}
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            placeholder={mode === "signup" ? "At least 8 characters" : "Your password"}
+          />
         )}
 
         {mode === "signup" && (
-          <label className="field">
-            <span>Confirm password</span>
-            <input
-              type="password"
-              autoComplete="new-password"
-              value={confirm}
-              onChange={e => setConfirm(e.target.value)}
-              placeholder="Repeat your password"
-            />
-          </label>
+          <PasswordField
+            label="Confirm password"
+            autoComplete="new-password"
+            value={confirm}
+            onChange={e => setConfirm(e.target.value)}
+            placeholder="Type it once more"
+          />
         )}
 
         {mode === "signin" && (
-          <div className="auth-row">
-            <button type="button" className="link-btn" onClick={() => go("forgot")}>
-              Forgot password?
-            </button>
+          <div className="row-right">
+            <button type="button" className="lnk" onClick={() => go("forgot")}>Forgot password?</button>
           </div>
         )}
 
-        {error && <p className="auth-error" role="alert">{error}</p>}
+        {error && <p className="msg-err" role="alert">{error}</p>}
         {needsVerify && (
-          <button type="button" className="link-btn auth-left" onClick={verifyFromSignin}>
+          <button type="button" className="lnk a-left" onClick={verifyFromSignin}>
             Send me a new verification email
           </button>
         )}
 
-        <button className="auth-submit" type="submit" disabled={loading}>
+        <button className="btn-primary" type="submit" disabled={loading}>
           {loading
             ? "Please wait…"
             : mode === "signin" ? "Sign in" : mode === "signup" ? "Create account" : "Send reset link"}
         </button>
 
-        <p className="auth-switch">
+        <p className="a-switch">
           {mode === "signin" && (
             <>New to DocuAI?{" "}
-              <button type="button" className="link-btn" onClick={() => go("signup")}>Create an account</button></>
+              <button type="button" className="lnk" onClick={() => go("signup")}>Create an account</button></>
           )}
           {mode === "signup" && (
             <>Already have an account?{" "}
-              <button type="button" className="link-btn" onClick={() => go("signin")}>Sign in</button></>
+              <button type="button" className="lnk" onClick={() => go("signin")}>Sign in</button></>
           )}
           {mode === "forgot" && (
-            <button type="button" className="link-btn" onClick={() => go("signin")}>Back to sign in</button>
+            <button type="button" className="lnk" onClick={() => go("signin")}>Back to sign in</button>
           )}
         </p>
         {onGuest && (
-          <p className="auth-switch">
-            <button type="button" className="link-btn" onClick={onGuest}>Continue as guest</button>
+          <p className="a-switch">
+            <button type="button" className="lnk" onClick={onGuest}>Continue as guest</button>
           </p>
         )}
       </form>
-    </div>
+    </AuthLayout>
   );
 }
 
@@ -281,23 +323,21 @@ export function VerifyScreen({ token, onSuccess, onBack }) {
   }, [token]);
 
   return (
-    <div className="auth-wrap">
-      <div className="auth-card">
-        <Brand />
-        {error ? (
-          <>
-            <h1 className="auth-title">Couldn't verify</h1>
-            <p className="auth-error" role="alert">{error}</p>
-            <p className="auth-sub">
-              Sign in with your email and password and we can send you a fresh link.
-            </p>
-            <button className="auth-submit" onClick={onBack}>Back to sign in</button>
-          </>
-        ) : (
-          <p className="auth-sub">Verifying your email…</p>
-        )}
-      </div>
-    </div>
+    <AuthLayout>
+      {error ? (
+        <>
+          <h1 className="a-title">We couldn’t verify that</h1>
+          <p className="msg-err" role="alert">{error}</p>
+          <p className="a-sub">Sign in with your email and password and we can send you a fresh link.</p>
+          <button className="btn-primary" onClick={onBack}>Back to sign in</button>
+        </>
+      ) : (
+        <>
+          <h1 className="a-title">Verifying your email…</h1>
+          <p className="a-sub">One moment, we’re getting you signed in.</p>
+        </>
+      )}
+    </AuthLayout>
   );
 }
 
@@ -313,7 +353,7 @@ export function ResetScreen({ token, onDone }) {
     e.preventDefault();
     setError("");
     if (password.length < 8) return setError("Password must be at least 8 characters.");
-    if (password !== confirm) return setError("Passwords don't match.");
+    if (password !== confirm) return setError("Passwords don’t match.");
     setLoading(true);
     try {
       const { r, d } = await post("/reset-password", { token, password });
@@ -326,41 +366,31 @@ export function ResetScreen({ token, onDone }) {
   }
 
   return (
-    <div className="auth-wrap">
-      <form className="auth-card" onSubmit={submit} noValidate>
-        <Brand />
-        <h1 className="auth-title">Choose a new password</h1>
-        <p className="auth-sub">Use at least 8 characters.</p>
-
-        <label className="field">
-          <span>New password</span>
-          <input
-            type="password"
-            autoComplete="new-password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            autoFocus
-          />
-        </label>
-        <label className="field">
-          <span>Confirm new password</span>
-          <input
-            type="password"
-            autoComplete="new-password"
-            value={confirm}
-            onChange={e => setConfirm(e.target.value)}
-          />
-        </label>
-
-        {error && <p className="auth-error" role="alert">{error}</p>}
-
-        <button className="auth-submit" type="submit" disabled={loading}>
+    <AuthLayout>
+      <form className="auth-card" style={{ maxWidth: "none" }} onSubmit={submit} noValidate>
+        <h1 className="a-title">Choose a new password</h1>
+        <p className="a-sub">Use at least 8 characters.</p>
+        <PasswordField
+          label="New password"
+          autoComplete="new-password"
+          value={password}
+          onChange={e => setPassword(e.target.value)}
+          autoFocus
+        />
+        <PasswordField
+          label="Confirm new password"
+          autoComplete="new-password"
+          value={confirm}
+          onChange={e => setConfirm(e.target.value)}
+        />
+        {error && <p className="msg-err" role="alert">{error}</p>}
+        <button className="btn-primary" type="submit" disabled={loading}>
           {loading ? "Please wait…" : "Update password"}
         </button>
-        <p className="auth-switch">
-          <button type="button" className="link-btn" onClick={() => onDone("")}>Back to sign in</button>
+        <p className="a-switch">
+          <button type="button" className="lnk" onClick={() => onDone("")}>Back to sign in</button>
         </p>
       </form>
-    </div>
+    </AuthLayout>
   );
 }

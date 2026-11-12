@@ -2,13 +2,13 @@ import asyncio
 import json
 import os
 import shutil
-import tempfile
 import time
 from contextlib import asynccontextmanager
 from datetime import timedelta
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -33,6 +33,29 @@ init_db()  # creates any missing tables on startup
 HOUR = 3600
 
 
+# ---------- stored PDFs (so the viewer can show them) ----------
+
+def _owner_dir(owner_key: str) -> str:
+    """One folder per account or guest: "u:12" -> uploads/u12, "g:<uuid>" -> uploads/g<uuid>."""
+    return os.path.join(config.UPLOAD_DIR, owner_key.replace(":", ""))
+
+
+def _purge_guest_files(cutoff_epoch: float) -> None:
+    root = config.UPLOAD_DIR
+    if not os.path.isdir(root):
+        return
+    for d in os.listdir(root):
+        folder = os.path.join(root, d)
+        if not (d.startswith("g") and os.path.isdir(folder)):  # only guest folders
+            continue
+        for name in os.listdir(folder):
+            path = os.path.join(folder, name)
+            if os.path.isfile(path) and os.path.getmtime(path) < cutoff_epoch:
+                os.remove(path)
+        if not os.listdir(folder):
+            os.rmdir(folder)
+
+
 # ---------- guest cleanup ----------
 
 def purge_guests() -> None:
@@ -44,7 +67,9 @@ def purge_guests() -> None:
         ):
             db.delete(conv)
         db.commit()
-    rag.purge_guest_chunks(int(time.time()) - config.GUEST_TTL_HOURS * HOUR)
+    cutoff_epoch = int(time.time()) - config.GUEST_TTL_HOURS * HOUR
+    rag.purge_guest_chunks(cutoff_epoch)
+    _purge_guest_files(cutoff_epoch)
 
 
 async def _purge_loop():
@@ -273,15 +298,20 @@ def upload(file: UploadFile = File(...), owner: Owner = Depends(current_owner)):
                 "Remove one, or sign in to add more.",
             )
 
-    # The PDF is only needed while we index it, so it goes in a temp folder that is wiped after.
-    with tempfile.TemporaryDirectory() as tmp:
-        path = os.path.join(tmp, name)
-        with open(path, "wb") as f:
-            shutil.copyfileobj(file.file, f)
-        try:
-            n = rag.ingest_pdf(path, owner.key)
-        except ValueError as e:
-            raise HTTPException(422, str(e))
+    # Keep the PDF so the viewer can show it later. If indexing fails, remove it again.
+    folder = _owner_dir(owner.key)
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, name)
+    with open(path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+    try:
+        n = rag.ingest_pdf(path, owner.key)
+    except ValueError as e:  # e.g. a scanned PDF with no text
+        os.remove(path)
+        raise HTTPException(422, str(e))
+    except Exception:  # damaged or password-protected PDF
+        os.remove(path)
+        raise HTTPException(422, "That PDF couldn't be read. It may be damaged or password-protected.")
     return {"file": name, "chunks": n}
 
 
@@ -335,7 +365,16 @@ def list_conversations(owner: Owner = Depends(current_owner), db: Session = Depe
         .limit(100)
         .all()
     )
-    return {"conversations": [{"id": c.id, "title": c.title} for c in rows]}
+    return {
+        "conversations": [
+            {
+                "id": c.id,
+                "title": c.title,
+                "updated_at": (c.updated_at.isoformat() + "Z") if c.updated_at else None,  # UTC
+            }
+            for c in rows
+        ]
+    }
 
 
 @app.get("/conversations/{conv_id}")
@@ -364,9 +403,23 @@ def documents(owner: Owner = Depends(current_owner)):
     return {"files": rag.list_sources(owner.key)}
 
 
+@app.get("/documents/{filename}/file")
+def document_file(filename: str, owner: Owner = Depends(current_owner)):
+    """The original PDF, for the in-app viewer. The path is built from the caller's own folder,
+    so nobody can request another user's file."""
+    path = os.path.join(_owner_dir(owner.key), os.path.basename(filename))
+    if not os.path.isfile(path):
+        raise HTTPException(404, "The original file isn't stored. Upload it again to view it.")
+    return FileResponse(path, media_type="application/pdf", content_disposition_type="inline")
+
+
 @app.delete("/documents/{filename}")
 def delete_document(filename: str, owner: Owner = Depends(current_owner)):
     n = rag.delete_source(filename, owner.key)
-    if n == 0:
+    path = os.path.join(_owner_dir(owner.key), os.path.basename(filename))
+    removed = os.path.isfile(path)
+    if removed:
+        os.remove(path)
+    if n == 0 and not removed:
         raise HTTPException(404, f"No chunks found for '{filename}'")
     return {"file": filename, "chunks_deleted": n}
